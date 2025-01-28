@@ -6,15 +6,25 @@ from robomaster import robot
 from object_detector import ObjectDetector
 import time
 
+from py.control.model_type import ModelType
+
+
 class RoboMasterVisionControl:
-    def __init__(self):
+    def __init__(self,model_type: ModelType):
+        self.model_type = model_type
         self.robot = robot.Robot()
-        self.detector = ObjectDetector()
+        self.detector = ObjectDetector(model_type)
         self.stop_event = threading.Event()
         self.frame_queue = queue.Queue(maxsize=1)
         self.camera = None
         self.chassis = None
         self.gimbal = None
+        self.target_threshold = 0.05
+        self.gimbal_speed = 20
+        self.target_lock_time = None
+        self.lock_duration = 0.5
+        self.last_shot_time = 0
+        self.shot_cooldown = 0.1
 
     def initialize(self):
         try:
@@ -59,18 +69,23 @@ class RoboMasterVisionControl:
 
         try:
             while not self.stop_event.is_set():
-                # Robot Movement
-                x_speed, y_speed, z_speed = self.get_chassis_input()
-                self.chassis.drive_speed(x=x_speed, y=y_speed, z=z_speed)
-
-                # Gimbal/Cannon Control
-                pitch, yaw = self.get_gimbal_input()
-                self.gimbal.drive_speed(pitch_speed=pitch, yaw_speed=yaw)
-
-                # Camera Processing
                 try:
                     frame = self.frame_queue.get(timeout=0.1)
-                    detected_frame, _ = self.detector.detect(frame)
+                    detected_frame, target_info = self.detector.detect(frame)
+
+                    if self.model_type == ModelType.PISTOL and target_info:
+                        # Track and shoot continuously while target is detected
+                        self.track_and_shoot(target_info)
+                    else:
+                        # Manual control when:
+                        # 1. Using COCO dataset
+                        # 2. No target detected
+                        x_speed, y_speed, z_speed = self.get_chassis_input()
+                        self.chassis.drive_speed(x=x_speed, y=y_speed, z=z_speed)
+
+                        pitch, yaw = self.get_gimbal_input()
+                        self.gimbal.drive_speed(pitch_speed=pitch, yaw_speed=yaw)
+
                     cv2.imshow("RoboMaster S1", detected_frame)
                 except queue.Empty:
                     continue
@@ -82,6 +97,36 @@ class RoboMasterVisionControl:
             print(f"Main loop error: {e}")
         finally:
             self.cleanup()
+
+    def track_and_shoot(self, target_info):
+        # Calculate gimbal movements
+        yaw_speed = self.gimbal_speed * target_info['x_offset']
+        pitch_speed = -self.gimbal_speed * target_info['y_offset']
+
+        current_time = time.time()
+
+        # Check if we're on target
+        if abs(target_info['x_offset']) < self.target_threshold and \
+                abs(target_info['y_offset']) < self.target_threshold:
+
+            # Stop gimbal movement when on target
+            self.gimbal.drive_speed(pitch_speed=0, yaw_speed=0)
+
+            # Initialize target lock time if not set
+            if self.target_lock_time is None:
+                self.target_lock_time = current_time
+
+            # Check if we've been locked long enough and cooldown has elapsed
+            elif current_time - self.target_lock_time >= self.lock_duration and \
+                    current_time - self.last_shot_time >= self.shot_cooldown:
+                self.robot.blaster.fire()
+                self.last_shot_time = current_time
+
+        else:
+            # Reset lock time if we're not on target
+            self.target_lock_time = None
+            # Move gimbal to track target
+            self.gimbal.drive_speed(pitch_speed=pitch_speed, yaw_speed=yaw_speed)
 
     def get_chassis_input(self):
         x_val, y_val, z_val = 0, 0, 0
