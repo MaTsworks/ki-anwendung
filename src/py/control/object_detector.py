@@ -1,5 +1,3 @@
-from enum import Enum
-
 import torch
 from torch.amp import autocast
 import cv2
@@ -26,10 +24,10 @@ class ObjectDetector:
 
         if self.model_type == ModelType.PISTOL:
             model_path = os.path.normpath(os.path.join(self.script_dir, '../../resources/pistol.pt'))
-            self.confidence_threshold = 0.9
+            self.confidence_threshold = 0.6
         elif self.model_type == ModelType.COCO:
             model_path = os.path.normpath(os.path.join(self.script_dir, '../../resources/yolov5s.pt'))
-            self.confidence_threshold = 0.5
+            self.confidence_threshold = 0.4
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
 

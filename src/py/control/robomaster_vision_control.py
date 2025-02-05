@@ -7,6 +7,7 @@ from object_detector import ObjectDetector
 import time
 
 from py.control.model_type import ModelType
+from py.control.performance_evaluator import PerformanceEvaluator
 
 
 class RoboMasterVisionControl:
@@ -25,6 +26,8 @@ class RoboMasterVisionControl:
         self.lock_duration = 0.5
         self.last_shot_time = 0
         self.shot_cooldown = 0.1
+        self.evaluator = PerformanceEvaluator()
+        self.evaluator.start_evaluation()
 
     def initialize(self):
         try:
@@ -57,8 +60,6 @@ class RoboMasterVisionControl:
                     print("Camera reconnected successfully")
                 except Exception as reconnect_error:
                     print(f"Reconnection failed: {reconnect_error}")
-                    print("Waiting 2 seconds before retry...")
-                    time.sleep(2)
 
     def run(self):
         if not self.initialize():
@@ -71,20 +72,28 @@ class RoboMasterVisionControl:
             while not self.stop_event.is_set():
                 try:
                     frame = self.frame_queue.get(timeout=0.1)
+                    start_time = time.time()
                     detected_frame, target_info = self.detector.detect(frame)
+                    detection_time = time.time() - start_time
+
+                    self.evaluator.log_detection(detection_time, target_info)
 
                     if self.model_type == ModelType.PISTOL and target_info:
-                        # Track and shoot continuously while target is detected
+                        yaw_speed = self.gimbal_speed * target_info['x_offset']
+                        pitch_speed = -self.gimbal_speed * target_info['y_offset']
+
+                        self.evaluator.log_tracking(target_info)
+
                         self.track_and_shoot(target_info)
                     else:
-                        # Manual control when:
-                        # 1. Using COCO dataset
-                        # 2. No target detected
                         x_speed, y_speed, z_speed = self.get_chassis_input()
                         self.chassis.drive_speed(x=x_speed, y=y_speed, z=z_speed)
 
                         pitch, yaw = self.get_gimbal_input()
                         self.gimbal.drive_speed(pitch_speed=pitch, yaw_speed=yaw)
+
+                        if target_info:
+                            self.evaluator.log_tracking(target_info)
 
                     cv2.imshow("RoboMaster S1", detected_frame)
                 except queue.Empty:
@@ -167,4 +176,5 @@ class RoboMasterVisionControl:
         self.chassis.drive_speed(x=0, y=0, z=0)
         self.gimbal.drive_speed(pitch_speed=0, yaw_speed=0)
         self.robot.close()
+        self.evaluator.save_report()
         cv2.destroyAllWindows()
