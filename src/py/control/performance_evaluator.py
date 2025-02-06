@@ -4,11 +4,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 from collections import defaultdict
-from datetime import datetime
 
 
 class PerformanceEvaluator:
-    def __init__(self, output_dir="output/reports"):
+    def __init__(self):
         self.metrics = defaultdict(list)
         self.start_time = None
         self.frame_count = 0
@@ -20,9 +19,8 @@ class PerformanceEvaluator:
             'tracking_accuracy': []
         }
 
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.base_output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'output')
-        self.output_dir = os.path.join(self.base_output_dir, f'performance_reports_{timestamp}')
+        base_output_dir = os.path.dirname(__file__)
+        self.output_dir = os.path.join(f'/../../{base_output_dir}', 'performance_reports')
         os.makedirs(self.output_dir, exist_ok=True)
 
     def start_evaluation(self):
@@ -45,10 +43,15 @@ class PerformanceEvaluator:
 
     def log_tracking(self, target_info):
         self.tracking_stats['total_frames'] += 1
+
         if target_info:
-            self.tracking_stats['successful_tracks'] += 1
             offset_distance = np.hypot(target_info['x_offset'], target_info['y_offset'])
             self.tracking_stats['tracking_accuracy'].append(offset_distance)
+
+            if offset_distance > 50:
+                self.tracking_stats['target_losses'] += 1
+            else:
+                self.tracking_stats['successful_tracks'] += 1
         else:
             self.tracking_stats['target_losses'] += 1
 
@@ -58,7 +61,6 @@ class PerformanceEvaluator:
         self._plot_metric(self.metrics['fps'], 'FPS Over Time', 'Frame', 'fps_trend.png', line=True)
         self._plot_metric(self.tracking_stats['tracking_accuracy'], 'Tracking Accuracy', 'Offset Distance',
                           'tracking_accuracy.png')
-        self._plot_tracking_success()
 
     def _plot_metric(self, data, title, xlabel, filename, line=False):
         if not data:
@@ -69,18 +71,6 @@ class PerformanceEvaluator:
         plt.xlabel(xlabel)
         plt.savefig(os.path.join(self.output_dir, filename))
         plt.close()
-
-    def _plot_tracking_success(self):
-        total = self.tracking_stats['total_frames']
-        success = self.tracking_stats['successful_tracks']
-        losses = self.tracking_stats['target_losses']
-
-        if total > 0:
-            plt.figure(figsize=(8, 8))
-            plt.pie([success, losses], labels=['Success', 'Losses'], autopct='%1.1f%%')
-            plt.title('Tracking Success Rate')
-            plt.savefig(os.path.join(self.output_dir, 'tracking_success.png'))
-            plt.close()
 
     def save_report(self):
         self.generate_visualization_report()
